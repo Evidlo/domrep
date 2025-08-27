@@ -1,0 +1,39 @@
+[project]
+name = "domrep"
+version = "0.0.1"
+readme = "README.md"
+description = "HTML report generation on top of Dominate"
+authors = [
+    { name = "Evan Widloski", email = "evan_pypi@widloski.com" },
+]
+license = {text = "GPL-3.0"}
+keywords = ["dominate", "HTML", "matplotlib", "report", "plotting"]
+requires-python = ">=3.7"
+dependencies = [
+    "dominate",
+]
+classifiers = [
+    "Topic :: Software Development :: Libraries",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]
+
+[project.urls]
+Homepage = "https://github.com/evidlo/domrep"
+Repository = "https://github.com/evidlo/domrep"
+Issues = "https://github.com/evidlo/domrep/issues"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages]
+# automatically look for subfolders with __init__.py
+find = {}
+
+[build-system]
+requires = ["setuptools>=59.0.0"]
+build-backend = 'setuptools.build_meta'
