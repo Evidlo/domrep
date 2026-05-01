@@ -77,11 +77,13 @@ def caption(title, *args, flow='row', **kwargs):
     flex-direction: {flow};
     border: 1px solid black;
     """ + kwargs.get('style', "")
-    return tags.figure(
+    inner = tags.div(*args, **kwargs)
+    tags.figure(
         tags.figcaption(title),
-        tags.div(*args, **kwargs),
+        inner,
         style="margin:5pt;"
     )
+    return inner
 
 
 class itemgrid(tags.div):
@@ -112,17 +114,19 @@ class itemgrid(tags.div):
 SLIDER_SCRIPT = r'''
 // make scope of entire script private
 (() => {
+var s = document.currentScript;
+document.addEventListener('DOMContentLoaded', () => {
 // --- get HTML elements ---
 var labels = LABELINSERT
-// get elements relative to this script tag
-var s = document.currentScript;
 // get overall container and elements
 var c = s.parentNode.parentNode;
 var slider = c.querySelector("#slider")
 var counter = c.querySelector("#counter")
 var playpause = c.querySelector("#playpause")
-// slider/script div is last element.  drop it to get all others
-var items = Array.from(c.children).slice(0, -1)
+// get slider items, exclude controls div
+var items = Array.from(c.children).filter(el => !el.classList.contains('slider'))
+slider.max = items.length - 1
+labels = items.map((el, i) => el.getAttribute('label') ?? labels[i] ?? String(i))
 
 // hide all items
 for ([index, item] of items.entries()) {
@@ -161,6 +165,7 @@ playpause.onclick = function() {
     }
     playing = !playing
 }
+});
 })();
 '''
 
@@ -180,9 +185,10 @@ def slider(*args, labels=None, interval=300, **kwargs):
             tags.input_(id="slider", name="slider", type="range", max=len(args)-1, value="0"),
             tags.button("⏯", id="playpause"),
             tags.script(util.raw(s), defer=True),
-            style="display: flex; align-items: center; justify-content: center",
+            style="order: 1; display: flex; align-items: center; justify-content: center",
             _class="slider"
         ),
+        style="display: inline-flex; flex-direction: column",
     )
 
 
@@ -208,6 +214,13 @@ if __name__ == '__main__':
             slider(*[plot(plt.imshow(x)) for x in np.random.random((20, 50, 50))])
 
     open('/www/dom2.html', 'w').write(d.render())
+
+    with document('hello') as doc:
+        with slider():
+            for x in np.random.random((20, 50, 50)):
+                plot(plt.imshow(x))
+
+    open('/www/dom22.html', 'w').write(doc.render())
 
     with document('title') as doc:
         plots = []
