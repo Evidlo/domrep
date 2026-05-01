@@ -7,6 +7,24 @@ from io import BytesIO
 import imageio
 import base64
 import tempfile
+from pathlib import Path
+
+class document(document):
+    def save(self, out):
+        """Convenience function save to disk
+
+        Args:
+            out (str, Path, or stream): location to write document to
+
+        Returns:
+            None or file
+        """
+        if hasattr(out, "write"):
+            out.write(self.render())
+        elif type(out) in (str, Path):
+            f = open(out, 'w')
+            f.write(self.render())
+            return f
 
 
 def plot(content, title=None, format=None, matkwargs={}, **kwargs):
