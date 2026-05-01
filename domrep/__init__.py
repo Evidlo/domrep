@@ -170,7 +170,21 @@ playpause.onclick = function() {
 '''
 
 def slider(*args, labels=None, interval=300, **kwargs):
-    """Create a sliding range of elements"""
+    """Create a sliding range of elements
+
+    Args:
+        *args: items to plot, may be `plot`s or any domrep object
+        labels (list(str), optional): slider labels
+        interval (int): time between frames (ms)
+
+    Labels may also be specified by `label` kwarg.  e.g:
+
+        slider(
+            plot(plt.imshow(...), label='foo 1'),
+            ...
+            plot(plt.imshow(...), label='foo 10'),
+        )
+    """
     if labels is None:
         labels = [f"{n}" for n in range(len(args))]
     elif type(labels) is str:
