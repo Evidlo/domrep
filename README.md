@@ -20,21 +20,36 @@ pip install domrep
 A basic document with plot and figure caption
 
 ``` python
-import domrep
-from dominate import tags, document
-
+from domrep import *
 import matplotlib.pyplot as plt
-import numpy as np
+from numpy.random import random
 
 with document('My Report') as doc:
-    domrep.caption(
-        "A random 100×100 array",
-        domrep.plot(
-            plt.imshow(np.random.random((100, 100)))
-        )
-    )
-open('output.html', 'w').write(doc.render())
+    # any item can be captioned
+    with caption("A random 100×100 array"):
+        # `plot` accepts any matplotlib figure/animation or image
+        plot(plt.imshow(random((100, 100))))
+
+        # or alternatively, if you to tweak the plots
+        # with plot():
+        #     plt.imshow(random((100, 100)))
+        #     plt.colorbar()
+
+doc.save('output.html')
 ```
 
-![Example 1 screenshot](example1.png)
+![Simple report generation](example1.png)
     
+``` python
+# use sliders to view many images/plots
+images = random((10, 100, 100))
+dates = range(10)
+with slider():
+    for date, image in zip(dates, images):
+        # plot() also works as a context manager
+        with plot(label=f'Date {date}'):
+            plt.imshow(image)
+            plt.colorbar()
+```
+
+![Interactive slider](example2.png)
