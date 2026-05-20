@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-__all__ = ['plot', 'caption', 'document', 'itemgrid', 'tags', 'util', 'slider']
+__all__ = ['plot', 'caption', 'document', 'itemgrid', 'tags', 'util', 'slider', 'dropdown']
 
 from dominate import tags, document, util
 from io import BytesIO
@@ -27,60 +27,64 @@ class document(document):
             return f
 
 
-def plot(content, title=None, format=None, matkwargs={}, **kwargs):
+class plot(tags.img):
     """Create HTML plot from Matplotlib figure/anim
 
     Args:
         content (Figure, Animation, or str): Generate image or animation
             if given a matplotlib Figure or Animation.  Use `content` as
-            <img> src if given str
+            <img> src if given str.  Omit to use as context manager.
         format (str): format to use when saving matplotlib Figure/Animation
         matkwargs: extra matplotlib arguments
         **kwargs: extra dominate arguments
-
-    Returns:
-        dominate.tags.img
-        or dominate.tags.figure if `title` is given
     """
-    import matplotlib
-    import matplotlib.animation
-    import numpy as np
 
-    # handle artists
-    content = content.figure if hasattr(content, 'figure') else content
+    tagname = 'img'
 
-    # if given path to image
-    if isinstance(content, str):
-        src = content
+    def __init__(self, content=None, format=None, matkwargs={}, **kwargs):
+        import matplotlib, matplotlib.animation
 
-    elif isinstance(content, matplotlib.figure.Figure):
+        self.format = format
+        self.matkwargs = matkwargs
+
+        content = content.figure if hasattr(content, 'figure') else content
+
+        if content is None:
+            src = ''
+        elif isinstance(content, str):
+            src = content
+        elif isinstance(content, matplotlib.figure.Figure):
+            src = self._to_img(content, format, matkwargs)
+        elif isinstance(content, matplotlib.animation.Animation):
+            fmt = 'gif' if format is None else format
+            with tempfile.NamedTemporaryFile(suffix=f'.{fmt}', delete=True) as tmpfile:
+                content.save(tmpfile.name, **matkwargs)
+                tmpfile.seek(0)
+                src = f'data:image/{fmt};base64,{base64.b64encode(tmpfile.read()).decode()}'
+        else:
+            raise TypeError(f"Unsupported object {type(content)}")
+
+        super().__init__(src=src, **kwargs)
+
+    @staticmethod
+    def _to_img(fig, format, matkwargs):
+        import numpy as np
+        fmt = 'png' if format is None else format
         buff = BytesIO()
-        format = 'png' if format is None else format
         with np.errstate(under='ignore'):
-            content.savefig(buff, format=format, **matkwargs)
-        src = 'data:image/{};base64,{}'.format(
-            format,
-            base64.b64encode(buff.getvalue()).decode()
-        )
+            fig.savefig(buff, format=fmt, **matkwargs)
+        return f'data:image/{fmt};base64,{base64.b64encode(buff.getvalue()).decode()}'
 
-    elif isinstance(content, matplotlib.animation.Animation):
-        # save animation to temporary file and load bytes
-        format = 'gif' if format is None else format
-        with tempfile.NamedTemporaryFile(suffix=f'.{format}', delete=True) as tmpfile:
-            anim.save(tmpfile.name, **matkwargs)
-            tmpfile.seek(0)
-            src = 'data:image/{};base64,{}'.format(
-                format,
-                base64.b64encode(tmpfile.read()).decode()
-            )
+    def __enter__(self):
+        import matplotlib.pyplot as plt
+        self._fig = plt.figure()
+        return super().__enter__()
 
-    elif content is None:
-        src = ''
-
-    else:
-        raise TypeError(f"Unsupported object {type(content)}")
-
-    return tags.img(src=src, **kwargs)
+    def __exit__(self, *args):
+        import matplotlib.pyplot as plt
+        self['src'] = self._to_img(self._fig, self.format, self.matkwargs)
+        plt.close(self._fig)
+        return super().__exit__(*args)
 
 
 def caption(title, *args, flow='row', **kwargs):
@@ -118,8 +122,10 @@ class itemgrid(tags.div):
 
         if flow == 'row':
             grid_template = f'grid-template-columns: {"min-content " * length}'
-        else:
+        elif flow == 'column':
             grid_template = f'grid-template-rows: {"min-content " * length}'
+        else:
+            raise ValueError(f"Invalid value for `flow` {flow}")
 
         kwargs['style'] = f"""
         display: grid;
@@ -146,8 +152,9 @@ var items = Array.from(c.children).filter(el => !el.classList.contains('slider')
 slider.max = items.length - 1
 labels = items.map((el, i) => el.getAttribute('label') ?? labels[i] ?? String(i))
 
-// hide all items
+// hide all items, saving original display value for restore
 for ([index, item] of items.entries()) {
+    item._display = getComputedStyle(item).display;
     item.style.display = 'none';
 }
 
@@ -163,7 +170,7 @@ slider.oninput = function() {
             current.style.display = 'none';
         }
         current = next;
-        current.style.display = 'unset';
+        current.style.display = current._display;
     })
 }
 slider.oninput()
@@ -221,8 +228,72 @@ def slider(*args, labels=None, interval=300, **kwargs):
             _class="slider"
         ),
         style="display: inline-flex; flex-direction: column",
+        **kwargs
     )
 
+
+DROPDOWN_SCRIPT = r'''
+(() => {
+var s = document.currentScript;
+document.addEventListener('DOMContentLoaded', () => {
+var labels = LABELINSERT
+var c = s.parentNode.parentNode;
+var dropdown = c.querySelector("#dropdown")
+// get items, exclude controls div
+var items = Array.from(c.children).filter(el => !el.classList.contains('dropdown'))
+labels = items.map((el, i) => el.getAttribute('label') ?? labels[i] ?? String(i))
+
+// populate dropdown options
+for ([index, label] of labels.entries()) {
+    var opt = document.createElement('option')
+    opt.value = index
+    opt.innerHTML = label
+    dropdown.appendChild(opt)
+}
+
+// hide all items, saving original display value for restore
+for ([index, item] of items.entries()) {
+    item._display = getComputedStyle(item).display;
+    item.style.display = 'none';
+}
+
+// show selected item on change
+var current = null;
+dropdown.onchange = function() {
+    if (current) current.style.display = 'none';
+    current = items[this.value];
+    current.style.display = current._display;
+}
+dropdown.onchange()
+});
+})();
+'''
+
+def dropdown(*args, labels=None, **kwargs):
+    """Create a dropdown selector for a set of elements
+
+    Args:
+        *args: items to show, may be `plot`s or any domrep object
+        labels (list(str), optional): dropdown option labels
+
+    Labels may also be specified by `label` kwarg on each item.
+    """
+    if labels is None:
+        labels = [f"{n}" for n in range(len(args))]
+    elif type(labels) is str:
+        labels = [f"{labels} {n}" for n in range(len(args))]
+    s = DROPDOWN_SCRIPT.replace('LABELINSERT', str(labels))
+    return tags.div(
+        *args,
+        tags.div(
+            tags.select(id="dropdown"),
+            tags.script(util.raw(s), defer=True),
+            style="order: 1; display: flex; align-items: center; justify-content: center",
+            _class="dropdown"
+        ),
+        style="display: inline-flex; flex-direction: column",
+        **kwargs
+    )
 
 
 if __name__ == '__main__':
