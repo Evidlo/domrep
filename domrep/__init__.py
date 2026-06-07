@@ -87,25 +87,37 @@ class plot(tags.img):
         return super().__exit__(*args)
 
 
-def caption(title, *args, flow='row', **kwargs):
+class caption(tags.figure):
     """Wraps a set of elements in a <figure> w/ <figcaption>
 
     Args:
         title (str): title to put in figcaption
         *args (list[...]): list of items to put in figure
+        flow (str): flex direction for content ('row' or 'column')
     """
-    kwargs['style'] = f"""
-    display: inline-flex;
-    flex-direction: {flow};
-    border: 1px solid black;
-    """ + kwargs.get('style', "")
-    inner = tags.div(*args, **kwargs)
-    tags.figure(
-        tags.figcaption(title),
-        inner,
-        style="margin:5pt;"
-    )
-    return inner
+
+    tagname = 'figure'
+
+    def __init__(self, title, *args, flow='row', **kwargs):
+        kwargs['style'] = f"""
+        display: inline-flex;
+        flex-direction: {flow};
+        border: 1px solid black;
+        """ + kwargs.get('style', "")
+        self._inner = tags.div(*args, **kwargs)
+        super().__init__(
+            tags.figcaption(title),
+            self._inner,
+            style="margin:5pt;"
+        )
+
+    def __enter__(self):
+        super().__enter__()
+        return self._inner.__enter__()
+
+    def __exit__(self, *args):
+        self._inner.__exit__(*args)
+        return super().__exit__(*args)
 
 
 class itemgrid(tags.div):
