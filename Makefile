@@ -3,15 +3,12 @@
 
 .PHONY: dist
 dist:
-    python -m build
+	python -m build
 
 .PHONY: pypi
 pypi: dist
-    twine upload dist/*
+	twine upload dist/*
 
 .PHONY: clean
 clean:
-    rm dist/*
-
-make clean
-make pypi
+	rm dist/*
