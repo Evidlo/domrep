@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-__all__ = ['plot', 'caption', 'document', 'itemgrid', 'tags', 'util', 'slider', 'dropdown']
+__all__ = ['plot', 'caption', 'document', 'itemgrid', 'tags', 'util', 'slider', 'sliderlock', 'dropdown']
 
 from dominate import tags, document, util
 from io import BytesIO
@@ -153,66 +153,135 @@ SLIDER_SCRIPT = r'''
 var s = document.currentScript;
 document.addEventListener('DOMContentLoaded', () => {
 // --- get HTML elements ---
-var labels = LABELINSERT
-// get overall container and elements
 var c = s.parentNode.parentNode;
-var slider = c.querySelector("#slider")
-var counter = c.querySelector("#counter")
-var playpause = c.querySelector("#playpause")
+var range = c.querySelector(".slider-range")
+var counter = c.querySelector(".slider-counter")
+var playpause = c.querySelector(".slider-playpause")
 // get slider items, exclude controls div
 var items = Array.from(c.children).filter(el => !el.classList.contains('slider'))
-slider.max = items.length - 1
-labels = items.map((el, i) => el.getAttribute('label') ?? labels[i] ?? String(i))
+var labels = items.map((el, i) => el.getAttribute('label') ?? LABELINSERT[i] ?? String(i))
+range.max = items.length - 1
 
 // hide all items, saving original display value for restore
-for ([index, item] of items.entries()) {
+for (const item of items) {
     item._display = getComputedStyle(item).display;
     item.style.display = 'none';
 }
 
-// --- slider input ---
-var current = items[slider.valueAsNumber];
-// hide previous element and show current element when slider changes
-slider.oninput = function() {
-    // make sure to load next image before hiding current to prevent flashing
-    next = items[this.valueAsNumber];
-    next.decode().then(() => {
-        counter.innerHTML = labels[slider.valueAsNumber]
-        if (current) {
-            current.style.display = 'none';
-        }
-        current = next;
-        current.style.display = current._display;
-    })
-}
-slider.oninput()
-
-// --- autoplay button ---
-function increment() {
-    slider.value = (slider.valueAsNumber + 1) % (parseInt(slider.max) + 1)
-    slider.oninput()
-}
+// --- state ---
+var current = null
 var playing = false
-var timer = null
-playpause.onclick = function() {
-    if (playing) {
-        window.clearInterval(timer)
-    } else {
-        timer = window.setInterval(increment, INTERVAL)
-    }
-    playing = !playing
+// timer runs unconditionally; ticks are suppressed when paused or driven
+window.setInterval(tick, INTERVAL)
+
+// show item `index`, hiding the previous one
+function show(index, propagate=true) {
+    index = Math.min(Math.max(index, 0), items.length - 1)
+    range.value = index
+    counter.innerHTML = labels[index]
+    var next = items[index]
+    // make sure to load next image before hiding current to prevent flashing
+    var img = next.matches('img') ? next : next.querySelector('img')
+    var ready = img ? img.decode().catch(() => {}) : Promise.resolve()
+    ready.then(() => {
+        if (current) current.style.display = 'none'
+        current = next
+        current.style.display = current._display
+    })
+    if (propagate) peers().forEach(o => o.show(index, false))
+}
+
+function setPlaying(state, propagate=true) {
+    playing = state
+    playpause.innerHTML = playing ? '⏸' : '⏵'
+    if (propagate) peers().forEach(o => o.setPlaying(state, false))
+}
+
+function tick() {
+    // while locked together, the first playing slider of the group drives
+    // the rest, so that a group advances at a single rate
+    var leads = o => o.playing && window.domrepSliders.indexOf(o) < order
+    if (!playing || peers().some(leads)) return
+    show((range.valueAsNumber + 1) % items.length)
+}
+
+// --- lock groups ---
+// sliders/locks register in page-global lists.  peers are the sliders that
+// some checked lock currently ties us to
+function peers() {
+    return window.domrepSliders.filter(o => o !== self && (window.domrepLocks || []).some(
+        l => l.checked() && (l.group === null || (l.group === self.group && l.group === o.group))
+    ))
+}
+
+var self = {
+    group: GROUPINSERT,
+    show: show,
+    setPlaying: setPlaying,
+    get playing() { return playing },
+    // push our state onto everything we are now locked to
+    sync: () => { show(range.valueAsNumber); setPlaying(playing) },
+}
+window.domrepSliders = window.domrepSliders || []
+var order = window.domrepSliders.push(self) - 1
+
+range.oninput = () => show(range.valueAsNumber)
+playpause.onclick = () => setPlaying(!playing)
+show(range.valueAsNumber)
+setPlaying(false)
+});
+})();
+'''
+
+SLIDERLOCK_SCRIPT = r'''
+(() => {
+var s = document.currentScript;
+document.addEventListener('DOMContentLoaded', () => {
+var checkbox = s.parentNode.querySelector('input.sliderlock')
+var group = GROUPINSERT
+window.domrepLocks = window.domrepLocks || []
+window.domrepLocks.push({group: group, checked: () => checkbox.checked})
+// on locking, align the group to its first slider
+checkbox.onchange = () => {
+    var members = window.domrepSliders.filter(o => group === null || o.group === group)
+    if (checkbox.checked && members.length) members[0].sync()
 }
 });
 })();
 '''
 
-def slider(*args, labels=None, interval=300, **kwargs):
+
+def _groupinsert(s, group):
+    return s.replace('GROUPINSERT', 'null' if group is None else repr(str(group)))
+
+
+def sliderlock(group=None, label=None, **kwargs):
+    """Checkbox that locks sliders together: while checked, moving any
+    slider in `group` moves all sliders in that group.
+
+    Args:
+        group (str, optional): slider group to lock; None locks all sliders
+        label (str, optional): checkbox label text
+    """
+    if label is None:
+        label = f'lock {group} sliders' if group else 'lock all sliders'
+    return tags.div(
+        tags.label(
+            tags.input_(type="checkbox", _class="sliderlock"),
+            label,
+        ),
+        tags.script(util.raw(_groupinsert(SLIDERLOCK_SCRIPT, group)), defer=True),
+        **kwargs
+    )
+
+def slider(*args, labels=None, interval=300, group=None, **kwargs):
     """Create a sliding range of elements
 
     Args:
         *args: items to plot, may be `plot`s or any domrep object
         labels (list(str), optional): slider labels
         interval (int): time between frames (ms)
+        group (str, optional): lock-group name, see `sliderlock`
 
     Labels may also be specified by `label` kwarg.  e.g:
 
@@ -229,12 +298,13 @@ def slider(*args, labels=None, interval=300, **kwargs):
     # substitute arguments into Javascript
     s = SLIDER_SCRIPT.replace('INTERVAL', str(interval))
     s = s.replace('LABELINSERT', str(labels))
+    s = _groupinsert(s, group)
     return tags.div(
         *args,
         tags.div(
-            tags.label(id="counter", _for="slider"),
-            tags.input_(id="slider", name="slider", type="range", max=len(args)-1, value="0"),
-            tags.button("⏯", id="playpause"),
+            tags.label(_class="slider-counter"),
+            tags.input_(_class="slider-range", type="range", max=len(args)-1, value="0"),
+            tags.button("⏵", _class="slider-playpause"),
             tags.script(util.raw(s), defer=True),
             style="order: 1; display: flex; align-items: center; justify-content: center",
             _class="slider"
